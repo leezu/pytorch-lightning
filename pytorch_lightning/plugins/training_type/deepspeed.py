@@ -30,6 +30,7 @@ from pytorch_lightning.plugins.training_type.ddp import DDPPlugin
 from pytorch_lightning.trainer.optimizers import _get_default_scheduler_config
 from pytorch_lightning.utilities import AMPType
 from pytorch_lightning.utilities.apply_func import apply_to_collection
+from pytorch_lightning.utilities.cloud_io import load as pl_load
 from pytorch_lightning.utilities.distributed import rank_zero_info, rank_zero_only
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.imports import _DEEPSPEED_AVAILABLE
@@ -554,7 +555,15 @@ class DeepSpeedPlugin(DDPPlugin):
         # Broadcast to ensure we load from the rank 0 checkpoint
         # This doesn't have to be the case when using deepspeed sharded checkpointing
         ckpt_path = self.broadcast(ckpt_path)
-        return super().restore_model_state_from_ckpt_path(ckpt_path, map_location=map_location)
+        ckpt = pl_load(ckpt_path, map_location=map_location)
+        # restore datamodule states
+        if self.lightning_module.trainer.datamodule is not None:
+            self.lightning_module.trainer.datamodule.on_load_checkpoint(ckpt)
+
+        # hook: give user access to checkpoint if needed.
+        self.lightning_module.on_load_checkpoint(ckpt)
+        self.lightning_module.load_state_dict(ckpt['state_dict'])
+        return ckpt, False
 
     def update_global_step(self, total_batch_idx: int, current_global_step: int) -> int:
         if self._original_accumulate_grad_batches is None:
