@@ -21,6 +21,9 @@ import pytorch_lightning as pl
 from pytorch_lightning.plugins.precision.mixed import MixedPrecisionPlugin
 from pytorch_lightning.utilities import _NATIVE_AMP_AVAILABLE, AMPType
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
+from pytorch_lightning.utilities.warnings import WarningCache
+
+warning_cache = WarningCache()
 
 
 class NativeMixedPrecisionPlugin(MixedPrecisionPlugin):
@@ -57,6 +60,13 @@ class NativeMixedPrecisionPlugin(MixedPrecisionPlugin):
             should_accumulate: whether to accumulate gradients or not
 
         """
+        if hasattr(torch, 'get_autocast_gpu_dtype') and str(torch.get_autocast_gpu_dtype()) == str(torch.bfloat16):
+            # torch.get_autocast_gpu_dtype() == torch.bfloat16 is always false
+            warning_cache.warn(
+                "Skipping torch.cuda.amp.GradScaler() in NativeMixedPrecisionPlugin as torch.bfloat16 is used "
+            )
+            return super().backward(model, closure_loss, optimizer, opt_idx, should_accumulate, *args, **kwargs)
+
         closure_loss = self.scaler.scale(closure_loss)
 
         closure_loss = super().backward(model, closure_loss, optimizer, opt_idx, should_accumulate, *args, **kwargs)
@@ -83,6 +93,8 @@ class NativeMixedPrecisionPlugin(MixedPrecisionPlugin):
                 f"native PyTorch amp and lbfgs are not compatible (optimizer {optimizer_idx})."
                 " To request, please file a Github issue in PyTorch and tag @mcarilli"
             )
+        if hasattr(torch, 'get_autocast_gpu_dtype') and str(torch.get_autocast_gpu_dtype()) == str(torch.bfloat16):
+            return True  # make_optimizer_step outside of the precision plugin
 
         if not pl_module.automatic_optimization:
             self.scaler.unscale_(optimizer)
