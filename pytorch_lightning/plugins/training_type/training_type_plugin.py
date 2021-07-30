@@ -238,6 +238,17 @@ class TrainingTypePlugin(Plugin, ABC):
         return False
 
     @property
+    def restore_checkpoint_after_pre_dispatch(self) -> bool:
+        """
+        Override to delay restoring from checkpoint till after pre-dispatch.
+        This is useful when the plugin requires all the setup hooks to run before loading checkpoint.
+
+        Returns:
+            If true, restore checkpoint after pre_dispatch.
+        """
+        return False
+
+    @property
     def lightning_restore_optimizer_and_schedulers(self) -> bool:
         """
         Override to disable Lightning restoring optimizers/schedulers.
