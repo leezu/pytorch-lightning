@@ -277,8 +277,6 @@ def test_deepspeed_run_configure_optimizers(tmpdir):
             assert isinstance(trainer.lr_schedulers[0]["scheduler"], torch.optim.lr_scheduler.StepLR)
             # check that the lr_scheduler config was preserved
             assert trainer.lr_schedulers[0]["name"] == "Sean"
-            # Ensure DeepSpeed engine has initialized with our lr_scheduler
-            assert isinstance(trainer.model.lr_scheduler, torch.optim.lr_scheduler.StepLR)
 
     class TestModel(BoringModel):
         def configure_optimizers(self):
@@ -317,8 +315,6 @@ def test_deepspeed_config(tmpdir, deepspeed_zero_config):
             assert isinstance(trainer.optimizers[0], FP16_DeepSpeedZeroOptimizer)
             assert isinstance(trainer.optimizers[0].optimizer, torch.optim.SGD)
             assert isinstance(trainer.lr_schedulers[0]["scheduler"], WarmupLR)
-            # Ensure DeepSpeed engine has initialized with our lr_scheduler
-            assert isinstance(trainer.model.lr_scheduler, WarmupLR)
 
     model = BoringModel()
     trainer = Trainer(
@@ -890,3 +886,97 @@ def test_deepspeed_skip_backward_raises(tmpdir):
     trainer = Trainer(default_root_dir=tmpdir, plugins=[DeepSpeedPlugin()], gpus=1, fast_dev_run=True, precision=16)
     with pytest.raises(MisconfigurationException, match="returning `None` .* is not supported"):
         trainer.fit(model)
+
+
+@RunIf(min_gpus=1, deepspeed=True, special=True)
+def test_deepspeed_warn_train_dataloader_called(tmpdir):
+    """Test DeepSpeed warns when it calls ``lightning_module.train_dataloader`` internally for logging batch
+    size."""
+    model = BoringModel()
+    trainer = Trainer(
+        default_root_dir=tmpdir,
+        plugins=[DeepSpeedPlugin()],
+        gpus=1,
+        fast_dev_run=True,
+    )
+    with pytest.warns(UserWarning, match="Inferring the batch size for internal deepspeed logging"):
+        trainer.fit(model)
+
+
+@RunIf(min_gpus=1, deepspeed=True, special=True)
+def test_deepspeed_setup_train_dataloader(tmpdir):
+    """Test DeepSpeed works when setup is required to call, and the user passes the batch size manually."""
+
+    class TestSetupIsCalledDataModule(LightningDataModule):
+        def __init__(self):
+            super().__init__()
+            self._setup = False
+
+        def setup(self, stage: Optional[str] = None) -> None:
+            self._setup = True
+
+        def train_dataloader(self):
+            assert self._setup
+            return DataLoader(RandomDataset(32, 64), batch_size=2)
+
+        def val_dataloader(self):
+            assert self._setup
+            return DataLoader(RandomDataset(32, 64), batch_size=2)
+
+        def test_dataloader(self):
+            assert self._setup
+            return DataLoader(RandomDataset(32, 64), batch_size=2)
+
+    model = BoringModel()
+    trainer = Trainer(
+        default_root_dir=tmpdir,
+        plugins=[DeepSpeedPlugin(logging_batch_size_per_gpu=32)],
+        gpus=1,
+        fast_dev_run=True,
+    )
+    trainer.fit(model, datamodule=TestSetupIsCalledDataModule())
+    trainer.test(model)
+
+
+@mock.patch("torch.optim.lr_scheduler.StepLR.step", autospec=True)
+@RunIf(min_gpus=1, deepspeed=True, special=True)
+def test_deepspeed_scheduler_step_count(mock_step):
+    """Test to ensure that the scheduler is called the correct amount of times during training when scheduler is
+    set to step."""
+    _run_scheduler_test(mock_step, max_epoch=2, limit_train_batches=2, interval="step")
+
+
+@mock.patch("torch.optim.lr_scheduler.StepLR.step", autospec=True)
+@RunIf(min_gpus=1, deepspeed=True, special=True)
+def test_deepspeed_scheduler_step_count_epoch(mock_step):
+    """Test to ensure that the scheduler is called the correct amount of times during training when scheduler is
+    set to epoch."""
+    _run_scheduler_test(mock_step, max_epoch=2, limit_train_batches=2, interval="epoch")
+
+
+def _run_scheduler_test(mock_step, max_epoch, limit_train_batches, interval):
+    class TestModel(BoringModel):
+        def configure_optimizers(self):
+            optimizer = torch.optim.SGD(self.layer.parameters(), lr=0.1)
+            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1, gamma=0.1)
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {"scheduler": scheduler, "interval": interval},
+            }
+
+    model = TestModel()
+    trainer = Trainer(
+        default_root_dir=os.getcwd(),
+        limit_train_batches=limit_train_batches,
+        limit_val_batches=0,
+        max_epochs=max_epoch,
+        gpus=1,
+        plugins="deepspeed",
+    )
+    trainer.fit(model)
+    if interval == "epoch":
+        # assert called once at init and once during training
+        assert mock_step.call_count == 1 + max_epoch
+    else:
+        # assert called once at init and once during training
+        assert mock_step.call_count == 1 + (max_epoch * limit_train_batches)
