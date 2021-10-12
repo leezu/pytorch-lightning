@@ -980,3 +980,50 @@ def _run_scheduler_test(mock_step, max_epoch, limit_train_batches, interval):
     else:
         # assert called once at init and once during training
         assert mock_step.call_count == 1 + (max_epoch * limit_train_batches)
+
+
+@RunIf(min_gpus=1, deepspeed=True, special=True)
+def test_different_accumulate_grad_batches_fails(tmpdir):
+    model = BoringModel()
+    trainer = Trainer(default_root_dir=tmpdir, accumulate_grad_batches={1: 2}, gpus=1, plugins="deepspeed")
+    with pytest.raises(
+        MisconfigurationException, match="DeepSpeed currently does not support different `accumulate_grad_batches`"
+    ):
+        trainer.fit(model)
+
+
+@RunIf(min_gpus=2, deepspeed=True, special=True)
+def test_specific_gpu_device_id(tmpdir):
+    class TestCallback(Callback):
+        def on_train_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+            assert model.device.index == 1
+
+        def on_train_batch_start(
+            self,
+            trainer: Trainer,
+            pl_module: LightningModule,
+            batch: Any,
+            batch_idx: int,
+            dataloader_idx: int,
+        ) -> None:
+            assert batch.device.index == 1
+
+        def on_test_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+            assert model.device.index == 1
+
+        def on_test_batch_start(
+            self,
+            trainer: Trainer,
+            pl_module: LightningModule,
+            batch: Any,
+            batch_idx: int,
+            dataloader_idx: int,
+        ) -> None:
+            assert batch.device.index == 1
+
+    model = BoringModel()
+    trainer = Trainer(
+        default_root_dir=tmpdir, fast_dev_run=True, gpus=[1], plugins="deepspeed", callbacks=TestCallback()
+    )
+    trainer.fit(model)
+    trainer.test(model)
