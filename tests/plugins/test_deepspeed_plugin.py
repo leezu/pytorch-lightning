@@ -636,8 +636,8 @@ def test_deepspeed_multigpu_stage_3_warns_resume_training(tmpdir):
     )
     with pytest.warns(
         UserWarning,
-        match="A single checkpoint file has been given. This means optimizer states and "
-        "scheduler states can not be restored. If you'd like to restore these states, you must "
+        match="A single checkpoint file has been given. This means optimizer states cannot be restored. "
+        "If you'd like to restore these states, you must "
         "provide a path to the originally saved DeepSpeed checkpoint.",
     ):
         trainer.fit(model, datamodule=dm)
@@ -645,9 +645,7 @@ def test_deepspeed_multigpu_stage_3_warns_resume_training(tmpdir):
 
 @RunIf(min_gpus=1, deepspeed=True, special=True)
 def test_deepspeed_multigpu_stage_3_resume_training(tmpdir):
-    """
-    Test to ensure with Stage 3 and multiple GPUs that we can resume training.
-    """
+    """Test to ensure with Stage 3 and single GPU that we can resume training."""
     initial_model = ModelParallelClassificationModel()
     dm = ClassifDataModule()
 
@@ -662,6 +660,8 @@ def test_deepspeed_multigpu_stage_3_resume_training(tmpdir):
         gpus=1,
         precision=16,
         callbacks=[ck],
+        enable_progress_bar=False,
+        enable_model_summary=False,
     )
     initial_trainer.fit(initial_model, datamodule=dm)
 
@@ -687,6 +687,11 @@ def test_deepspeed_multigpu_stage_3_resume_training(tmpdir):
             # assert epoch has correctly been restored
             assert trainer.current_epoch == 1
 
+            # assert lr-scheduler states are loaded correctly
+            original_lr_scheduler = initial_trainer.lr_schedulers[0]["scheduler"]
+            current_lr_scheduler = trainer.lr_schedulers[0]["scheduler"]
+            assert original_lr_scheduler.state_dict() == current_lr_scheduler.state_dict()
+
     model = ModelParallelClassificationModel()
     trainer = Trainer(
         default_root_dir=tmpdir,
@@ -696,6 +701,8 @@ def test_deepspeed_multigpu_stage_3_resume_training(tmpdir):
         precision=16,
         resume_from_checkpoint=ck.best_model_path,
         callbacks=TestCallback(),
+        enable_progress_bar=False,
+        enable_model_summary=False,
     )
     trainer.fit(model, datamodule=dm)
 
