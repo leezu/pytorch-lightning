@@ -266,7 +266,7 @@ class TrainingTypePlugin(ABC):
         return False
 
     @property
-    def lightning_restore_optimizer_and_schedulers(self) -> bool:
+    def lightning_restore_optimizer(self) -> bool:
         """Override to disable Lightning restoring optimizers/schedulers.
 
         This is useful for plugins which manage restoring optimizers/schedulers.
