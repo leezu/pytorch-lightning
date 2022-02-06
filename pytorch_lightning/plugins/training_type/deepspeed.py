@@ -509,7 +509,7 @@ class DeepSpeedPlugin(DDPPlugin):
             assert self._config_initialized
             dtype = torch.float16 if self.precision in (16, "mixed") else torch.float32
             model_parallel_context = deepspeed.zero.Init(
-                remote_device=self.remote_device, pin_memory=True, config_dict_or_path=self.config, dtype=dtype
+                remote_device=self.remote_device, pin_memory=True, config=self.config, dtype=dtype
             )
         else:
             model_parallel_context = super().model_sharded_context()
