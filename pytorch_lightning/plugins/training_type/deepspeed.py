@@ -67,7 +67,7 @@ class LightningDeepSpeedModule(_LightningModuleWrapperBase):
         self.precision = precision
 
     def forward(self, *inputs, **kwargs):
-        if self.precision == 16:
+        if self.precision in (16, "bf16"):
             inputs = self._move_float_tensors_to_half(inputs)
 
         return super().forward(*inputs, **kwargs)
@@ -76,8 +76,15 @@ class LightningDeepSpeedModule(_LightningModuleWrapperBase):
     def batch_to(data):
         return data.half()
 
+    @staticmethod
+    def batch_to_bfloat16(data):
+        return data.bfloat16()
+
     def _move_float_tensors_to_half(self, batch: Any):
-        batch = apply_to_collection(batch, (torch.FloatTensor, torch.cuda.FloatTensor), function=self.batch_to)
+        if self.precision == 16:
+            batch = apply_to_collection(batch, (torch.FloatTensor, torch.cuda.FloatTensor), function=self.batch_to)
+        elif self.precision == "bf16":
+            batch = apply_to_collection(batch, (torch.FloatTensor, torch.cuda.FloatTensor), function=self.batch_to_bfloat16)
         return batch
 
 
@@ -651,6 +658,11 @@ class DeepSpeedPlugin(DDPPlugin):
             elif "amp" not in self.config and self.amp_type == AMPType.APEX:
                 rank_zero_only("Enabling DeepSpeed APEX Implementation.")
                 self.config["amp"] = {"enabled": True, "opt_level": amp_level}
+        if self.precision == "bf16":
+            if "bf16" not in self.config:
+                # BF16 is a DeepSpeed standalone AMP implementation
+                rank_zero_info("Enabling DeepSpeed BF16.")
+                self.config["bf16"] = {"enabled": True}
 
     def _create_default_config(
         self,
