@@ -662,7 +662,9 @@ class DeepSpeedPlugin(DDPPlugin):
             if "bf16" not in self.config:
                 # BF16 is a DeepSpeed standalone AMP implementation
                 rank_zero_info("Enabling DeepSpeed BF16.")
-                self.config["bf16"] = {"enabled": True}
+                # NOTE bfloat16 key is replaced by bf16 in newer versions of
+                # DeepSpeed, but we keep it here for backwards compatibility
+                self.config["bfloat16"] = {"enabled": True}
 
     def _create_default_config(
         self,
