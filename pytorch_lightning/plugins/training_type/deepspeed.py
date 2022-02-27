@@ -514,7 +514,12 @@ class DeepSpeedPlugin(DDPPlugin):
     def model_sharded_context(self) -> Generator[None, None, None]:
         if self.zero_stage_3:
             assert self._config_initialized
-            dtype = torch.float16 if self.precision in (16, "mixed") else torch.float32
+            if self.precision in (16, "mixed"):
+                dtype = torch.float16
+            elif self.precision == "bf16":
+                dtype = torch.bfloat16
+            else:
+                dtype = torch.float32
             model_parallel_context = deepspeed.zero.Init(
                 remote_device=self.remote_device, pin_memory=True, config=self.config, dtype=dtype
             )
