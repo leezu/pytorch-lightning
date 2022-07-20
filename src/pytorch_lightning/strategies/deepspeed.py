@@ -554,7 +554,7 @@ class DeepSpeedStrategy(DDPStrategy):
                 dtype = torch.float32
 
             model_parallel_context = deepspeed.zero.Init(
-                remote_device=self.remote_device, pin_memory=True, config_dict_or_path=self.config, dtype=dtype
+                remote_device=self.remote_device, pin_memory=True, config=self.config, dtype=dtype
             )
         else:
             model_parallel_context = super().model_sharded_context()
@@ -711,8 +711,9 @@ class DeepSpeedStrategy(DDPStrategy):
                 rank_zero_info("Enabling DeepSpeed APEX Implementation.")
                 self.config["amp"] = {"enabled": True, "opt_level": self.precision_plugin.amp_level}
         elif "bf16" not in self.config and self.precision_plugin.precision == PrecisionType.BFLOAT:
+            # BF16 is a DeepSpeed standalone AMP implementation
             rank_zero_info("Enabling DeepSpeed BF16.")
-            self.config["bf16"] = {"enabled": True}
+            self.config["bfloat16"] = {"enabled": True}
 
     def _create_default_config(
         self,
